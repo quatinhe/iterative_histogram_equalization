@@ -12,13 +12,13 @@ images.
 - **src**: project source files.
 - **test**: project test files that make use of the Google Test framework.
 
-# Installation requirements
+## Installation requirements
 
 C++ compiler and a profiler.
 
 cmake is advised
 
-# Compilation and Execution
+## Compilation and Execution
 To compile import in a IDE that supports cmake or run the following sequence of command in a terminal:
 
 
