@@ -3,6 +3,9 @@ project(project)
 
 set(CMAKE_CXX_STANDARD 17)
 
+#find OpenMP
+find_package(OpenMP REQUIRED)
+
 ###############
 # libWB
 ###############
@@ -22,6 +25,11 @@ add_executable(project
         src/histogram_eq.cpp
 )
 
+#link OpenMP if found
+if(OpenMP_CXX_FOUND)
+    target_compile_options(project PRIVATE ${OpenMP_CXX_FLAGS})
+    target_link_libraries(project OpenMP::OpenMP_CXX)
+endif()
 target_link_libraries(project wb)
 
 ##############################################################
