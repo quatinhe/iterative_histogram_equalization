@@ -3,15 +3,18 @@
 //
 
 #include "histogram_eq.h"
+#include <chrono>
+#include <iostream>
+#include <algorithm>
 
 namespace cp {
-    constexpr auto HISTOGRAM_LENGTH = 256;
+    constexpr auto HISTOGRAM_LENGTH = 256; // Corresponde ao número de tons de cinza em 8bit
 
     static float inline prob(const int x, const int size) {
         return (float) x / (float) size;
     }
 
-    static unsigned char inline clamp(unsigned char x) {
+    static unsigned char inline clamp(unsigned char x) { //assegura q um valor está no range
         return std::min(std::max(x, static_cast<unsigned char>(0)), static_cast<unsigned char>(255));
     }
 
@@ -31,10 +34,15 @@ namespace cp {
         const auto size = width * height;
         const auto size_channels = size * channels;
 
-        for (int i = 0; i < size_channels; i++)
+        //auto start = std::chrono::high_resolution_clock::now();
+        for (int i = 0; i < size_channels; i++) //converte float para uchar (Leva aproximadamente 0.03s para o lake.ppm)
             uchar_image[i] = (unsigned char) (255 * input_image_data[i]);
+        //auto finish = std::chrono::high_resolution_clock::now();
+            //std::chrono::duration<double> elapsed = finish - start;
+            //std::cout << "Converter float to Uchar time: " << elapsed.count() << " s\n";
 
-        for (int i = 0; i < height; i++)
+        //#pragma omp parallel for
+        for (int i = 0; i < height; i++) //converte para tons de cinza (Leva aproximadamente 0.05s para o lake.ppm)
             for (int j = 0; j < width; j++) {
                 auto idx = i * width + j;
                 auto r = uchar_image[3 * idx];
@@ -43,22 +51,23 @@ namespace cp {
                 gray_image[idx] = static_cast<unsigned char>(0.21 * r + 0.71 * g + 0.07 * b);
             }
 
-        std::fill(histogram, histogram + HISTOGRAM_LENGTH, 0);
-        for (int i = 0; i < size; i++)
+
+        std::fill(histogram, histogram + HISTOGRAM_LENGTH, 0); //inicializa histograma
+        for (int i = 0; i < size; i++) //calcula histograma
             histogram[gray_image[i]]++;
 
-        cdf[0] = prob(histogram[0], size);
-        for (int i = 1; i < HISTOGRAM_LENGTH; i++)
+        cdf[0] = prob(histogram[0], size); //calcula cdf
+        for (int i = 1; i < HISTOGRAM_LENGTH; i++) //calcula cdf
             cdf[i] = cdf[i - 1] + prob(histogram[i], size);
 
         auto cdf_min = cdf[0];
         for (int i = 1; i < HISTOGRAM_LENGTH; i++)
             cdf_min = std::min(cdf_min, cdf[i]);
 
-        for (int i = 0; i < size_channels; i++)
+        for (int i = 0; i < size_channels; i++) //correção de cor
             uchar_image[i] = correct_color(cdf[uchar_image[i]], cdf_min);
 
-        for (int i = 0; i < size_channels; i++)
+        for (int i = 0; i < size_channels; i++) //converte uchar para float
             output_image_data[i] = static_cast<float>(uchar_image[i]) / 255.0f;
     }
 
