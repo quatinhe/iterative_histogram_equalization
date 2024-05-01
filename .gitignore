@@ -34,7 +34,7 @@
 
 cmake-build-*
 .idea/
-
+/build/
 /cmake-build-debug/
 *.o
 *.so
