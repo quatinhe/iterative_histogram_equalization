@@ -41,7 +41,7 @@ namespace cp {
             //std::chrono::duration<double> elapsed = finish - start;
             //std::cout << "Converter float to Uchar time: " << elapsed.count() << " s\n";
 
-        #pragma omp parallel for
+        #pragma omp parallel for collapse(2)
         for (int i = 0; i < height; i++) //converte para tons de cinza (Leva aproximadamente 0.05s para o lake.ppm)
             for (int j = 0; j < width; j++) {
                 auto idx = i * width + j;
@@ -53,19 +53,19 @@ namespace cp {
 
 
         std::fill(histogram, histogram + HISTOGRAM_LENGTH, 0); //inicializa histograma
-        #pragma omp parallel for
-        for (int i = 0; i < size; i++)
-            #pragma omp atomic//calcula histograma
-            histogram[gray_image[i]]++;
+
+        for (int i = 0; i < size; i++) //calcula histograma
+            histogram[gray_image[i]]++; //verificar se é necessario usar atomic
 
         cdf[0] = prob(histogram[0], size); //calcula cdf
-        for (int i = 1; i < HISTOGRAM_LENGTH; i++) //calcula cdf
-                                                   //  ##TODO retirar a dependencie deste loop para paralelizar
-            cdf[i] = cdf[i - 1] + prob(histogram[i], size);
+        for (int i = 1; i < HISTOGRAM_LENGTH; i++)
+            cdf[i] = cdf[i - 1] + prob(histogram[i], size); //nao paralelizavel
 
         auto cdf_min = cdf[0];
+        #pragma omp parallel for reduction(min: cdf_min)
         for (int i = 1; i < HISTOGRAM_LENGTH; i++)
             cdf_min = std::min(cdf_min, cdf[i]);
+
         #pragma omp parallel for
         for (int i = 0; i < size_channels; i++) //correção de cor
             uchar_image[i] = correct_color(cdf[uchar_image[i]], cdf_min);
