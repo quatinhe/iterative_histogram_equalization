@@ -34,3 +34,17 @@
 
 cmake-build-*
 .idea/
+
+/cmake-build-debug/
+*.o
+*.so
+*.exe
+/bin/
+/lib/
+/libwb/
+*.log
+*.cache
+*.cmake
+CMakeFiles/
+CMakeCache.txt
+CTestTestfile.cmake
