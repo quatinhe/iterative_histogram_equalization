@@ -3,18 +3,18 @@
 //
 
 #include "histogram_eq.h"
-#include <chrono>
 #include <iostream>
+#include <chrono>
 #include <algorithm>
 
 namespace cp {
-    constexpr auto HISTOGRAM_LENGTH = 256; // Corresponde ao número de tons de cinza em 8bit
+    constexpr auto HISTOGRAM_LENGTH = 256;
 
     static float inline prob(const int x, const int size) {
         return (float) x / (float) size;
     }
 
-    static unsigned char inline clamp(unsigned char x) { //assegura q um valor está no range
+    static unsigned char inline clamp(unsigned char x) {
         return std::min(std::max(x, static_cast<unsigned char>(0)), static_cast<unsigned char>(255));
     }
 
@@ -22,35 +22,25 @@ namespace cp {
         return clamp(static_cast<unsigned char>(255 * (cdf_val - cdf_min) / (1 - cdf_min)));
     }
 
-    //function to apply cdf
-    void apply_cdf(const unsigned char* image, const std::vector<float> &cdf, unsigned char* output_image, int size){
-        #pragma omp parallel for
-            for(int i =0; i < size; i++){
-                output_image[i] = correct_color(cdf[image[i]], cdf[0]);
-            }
-    }
-
     static void histogram_equalization(const int width, const int height,
-                                const float *input_image_data,
-                                float *output_image_data,
-                                const std::shared_ptr<unsigned char[]> &uchar_image,
-                                const std::shared_ptr<unsigned char[]> &gray_image,
-                                int (&histogram)[HISTOGRAM_LENGTH],
-                                float (&cdf)[HISTOGRAM_LENGTH]) {
+                                       const float *input_image_data,
+                                       float *output_image_data,
+                                       const std::shared_ptr<unsigned char[]> &uchar_image,
+                                       const std::shared_ptr<unsigned char[]> &gray_image,
+                                       int (&histogram)[HISTOGRAM_LENGTH],
+                                       float (&cdf)[HISTOGRAM_LENGTH]) {
 
         constexpr auto channels = 3;
         const auto size = width * height;
         const auto size_channels = size * channels;
 
-        //auto start = std::chrono::high_resolution_clock::now();
-        for (int i = 0; i < size_channels; i++) //converte float para uchar (Leva aproximadamente 0.03s para o lake.ppm)
+        // Section 1: Image Conversion
+        auto start1 = std::chrono::high_resolution_clock::now();
+        for (int i = 0; i < size_channels; i++)
             uchar_image[i] = (unsigned char) (255 * input_image_data[i]);
-        //auto finish = std::chrono::high_resolution_clock::now();
-            //std::chrono::duration<double> elapsed = finish - start;
-            //std::cout << "Converter float to Uchar time: " << elapsed.count() << " s\n";
-        //TODO: Fazer isto uma função
+
         #pragma omp parallel for collapse(2)
-        for (int i = 0; i < height; i++) //converte para tons de cinza (Leva aproximadamente 0.05s para o lake.ppm)
+        for (int i = 0; i < height; i++)
             for (int j = 0; j < width; j++) {
                 auto idx = i * width + j;
                 auto r = uchar_image[3 * idx];
@@ -58,40 +48,54 @@ namespace cp {
                 auto b = uchar_image[3 * idx + 2];
                 gray_image[idx] = static_cast<unsigned char>(0.21 * r + 0.71 * g + 0.07 * b);
             }
-        /** O Colapse neste contexto permite o OpenMP distribuir as iterações de ambos os loops pelas threads*/
+        auto end1 = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed1 = end1 - start1;
+        double milliseconds1 = elapsed1.count() * 1000.0;
+        std::cout << "Elapsed time for image conversion: " << milliseconds1 << " milliseconds" << std::endl;
 
+        // Section 2: Histogram Calculation
+        auto start2 = std::chrono::high_resolution_clock::now();
+        std::fill(histogram, histogram + HISTOGRAM_LENGTH, 0);
+        for (int i = 0; i < size; i++)
+            histogram[gray_image[i]]++;
 
-        std::fill(histogram, histogram + HISTOGRAM_LENGTH, 0); //inicializa histograma
+        auto end2 = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed2 = end2 - start2;
+        double milliseconds2 = elapsed2.count() * 1000.0;
+        std::cout << "Elapsed time for histogram calculation: " << milliseconds2 << " milliseconds" << std::endl;
 
-        for (int i = 0; i < size; i++) //calcula histograma
-            histogram[gray_image[i]]++; //verificar se é necessario usar atomic
-
-        std::vector<float> cdf_vector(HISTOGRAM_LENGTH, 0);//nova variavel para teste
-        cdf_vector[0] = prob(histogram[0], size); //calcula cdf
+        // Section 3: CDF Calculation
+        auto start3 = std::chrono::high_resolution_clock::now();
+        cdf[0] = prob(histogram[0], size);
         for (int i = 1; i < HISTOGRAM_LENGTH; i++)
-            cdf_vector[i] = cdf_vector[i - 1] + prob(histogram[i], size); //nao paralelizavel
+            cdf[i] = cdf[i - 1] + prob(histogram[i], size);
 
         auto cdf_min = cdf[0];
-        #pragma omp parallel for reduction(min: cdf_min)
         for (int i = 1; i < HISTOGRAM_LENGTH; i++)
             cdf_min = std::min(cdf_min, cdf[i]);
-        /**Este reduction permite que cada thread faça a operação em paralelo numa cópia privada do 'cdf_min' e combina
-         * o resultado usando a operação min
-         */
 
-  /**      #pragma omp parallel for
-        for (int i = 0; i < size_channels; i++) //correção de cor
-            uchar_image[i] = correct_color(cdf[uchar_image[i]], cdf_min);*/
-        std::vector<unsigned char> output_image(size_channels);
-        apply_cdf(uchar_image.get(), cdf_vector, output_image.data(), size_channels);
+        auto end3 = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed3 = end3 - start3;
+        double milliseconds3 = elapsed3.count() * 1000.0;
+        std::cout << "Elapsed time for CDF calculation: " << milliseconds3 << " milliseconds" << std::endl;
 
-        for (int i = 0; i < size_channels; i++) //converte uchar para float
+        // Section 4: Image Correction and Output
+        auto start4 = std::chrono::high_resolution_clock::now();
+        for (int i = 0; i < size_channels; i++)
+            uchar_image[i] = correct_color(cdf[uchar_image[i]], cdf_min);
+
+        for (int i = 0; i < size_channels; i++)
             output_image_data[i] = static_cast<float>(uchar_image[i]) / 255.0f;
+
+        auto end4 = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed4 = end4 - start4;
+        double milliseconds4 = elapsed4.count() * 1000.0;
+        std::cout << "Elapsed time for image correction and output: " << milliseconds4 << " milliseconds" << std::endl;
     }
 
-
-
     wbImage_t iterative_histogram_equalization(wbImage_t &input_image, int iterations) {
+
+        auto startTotal = std::chrono::high_resolution_clock::now();
 
         const auto width = wbImage_getWidth(input_image);
         const auto height = wbImage_getHeight(input_image);
@@ -117,6 +121,10 @@ namespace cp {
 
             input_image_data = output_image_data;
         }
+        auto endTotal = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> totalElapsed = endTotal - startTotal;
+        double milliseconds = totalElapsed.count() * 1000.0;
+        std::cout << "Elapsed time: " << milliseconds << " milliseconds" << std::endl;
 
         return output_image;
     }
