@@ -15,7 +15,7 @@ add_subdirectory(libwb)
 include_directories(libwb)
 
 ###############
-# project
+# sequencial
 ###############
 
 include_directories(include)
@@ -23,14 +23,23 @@ include_directories(include)
 add_executable(project
         src/main.cpp
         src/histogram_eq.cpp
+
+)
+target_link_libraries(project wb)
+
+
+###############
+# paralelo
+###############
+
+find_package(OpenMP REQUIRED)
+
+add_executable(project_par
+        src/main.cpp
+        src/histogram_eq_par.cpp
 )
 
-#link OpenMP if found
-if(OpenMP_CXX_FOUND)
-    target_compile_options(project PRIVATE ${OpenMP_CXX_FLAGS})
-    target_link_libraries(project OpenMP::OpenMP_CXX)
-endif()
-target_link_libraries(project wb)
+target_link_libraries(project_par PUBLIC OpenMP::OpenMP_CXX wb)
 
 ##############################################################
 # Tests
