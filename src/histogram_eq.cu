@@ -64,6 +64,21 @@ __global__ void applyColorCorrectionKernel(unsigned char* image, const float* cd
     }
 }
 
+__global__ void convertFloatToUCharKernel(const float* input, unsigned char* output, int size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < size) {
+        output[idx] = static_cast<unsigned char>(255 * input[idx]);
+    }
+}
+
+__global__ void convertToFloatKernel(const unsigned char* input, float* output, int size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < size) {
+        output[idx] = input[idx] / 255.0f;
+    }
+}
+
+
 namespace cp {
 
     static float inline prob(const int x, const int size) {
@@ -95,6 +110,15 @@ namespace cp {
             output_image[i] = static_cast<unsigned char>(255 * input_image_data[i]);
         }
     }
+
+    void convertFloatToUCharGPU(const float* d_input, unsigned char* d_output, int size_channels) {
+        int threadsPerBlock = 256;
+        int blocksPerGrid = (size_channels + threadsPerBlock - 1) / threadsPerBlock;
+
+        convertFloatToUCharKernel<<<blocksPerGrid, threadsPerBlock>>>(d_input, d_output, size_channels);
+        cudaCheckError();
+    }
+
 
 
     void computeHistogramWithCUB(const unsigned char* d_input, int* d_histogram, size_t num_items, cudaStream_t stream = 0) {
@@ -166,100 +190,106 @@ namespace cp {
             output_image_data[i] = static_cast<float>(input_image[i]) / 255.0f;
         }
     }
+    void convertToFloatGPU(const unsigned char* d_input, float* d_output, int size_channels) {
+        int threadsPerBlock = 256;
+        int blocksPerGrid = (size_channels + threadsPerBlock - 1) / threadsPerBlock;
 
-    static void histogram_equalization(const int width, const int height,
-                                       const float *input_image_data,
-                                       float *output_image_data,
-                                       const std::shared_ptr<unsigned char[]> &uchar_image,
-                                       const std::shared_ptr<unsigned char[]> &gray_image,
-                                       int (&histogram)[HISTOGRAM_LENGTH],
-                                       float (&cdf)[HISTOGRAM_LENGTH]) {
+        convertToFloatKernel<<<blocksPerGrid, threadsPerBlock>>>(d_input, d_output, size_channels);
+        cudaCheckError();
+    }
+
+
+    static void histogram_equalization(
+            const int width, const int height,
+            float *d_input_image_data,
+            float *d_output_image_data,
+            unsigned char *d_input_image,
+            unsigned char *d_gray_image,
+            unsigned char *d_uchar_image,
+            int *d_histogram,
+            float *d_cdf,
+            float (&cdf)[HISTOGRAM_LENGTH]
+    ) {
 
         constexpr auto channels = 3;
         const auto size = width * height;
         const auto size_channels = size * channels;
 
+        convertFloatToUCharGPU(d_input_image_data, d_uchar_image, size_channels);
 
-        // perparar apontadores
+        convertToGrayscaleGPU(d_input_image, d_gray_image, width, height);
+
+        cudaMemset(d_histogram, 0, HISTOGRAM_LENGTH * sizeof(int));
+
+        computeHistogramWithCUB(d_gray_image, d_histogram, size);
+
+        computeCDFWithCUB(d_histogram, d_cdf, HISTOGRAM_LENGTH, size);
+
+        cudaMemcpy(cdf, d_cdf, HISTOGRAM_LENGTH * sizeof(float), cudaMemcpyDeviceToHost);
+        cudaCheckError();
+
+        float cdf_min = *std::min_element(cdf, cdf + HISTOGRAM_LENGTH);
+
+
+        applyColorCorrectionGPU(d_uchar_image, d_cdf, cdf_min, size_channels);
+
+        convertToFloatGPU(d_uchar_image, d_output_image_data, size_channels);
+    }
+
+
+
+
+    wbImage_t iterative_histogram_equalization(wbImage_t &input_image, int iterations) {
+        const int width = wbImage_getWidth(input_image);
+        const int height = wbImage_getHeight(input_image);
+        constexpr int channels = 3;
+        const int size = width * height;
+        const int size_channels = size * channels;
+
+        // Allocate memory for the output image
+        wbImage_t output_image = wbImage_new(width, height, channels);
+        float *output_image_data = wbImage_getData(output_image);
+
+        // GPU memory allocations
+        float *d_input_image_data, *d_output_image_data;
+        cudaMalloc(&d_input_image_data, size_channels * sizeof(float));
+        cudaMalloc(&d_output_image_data, size_channels * sizeof(float));
+
+        // Transfer input data to GPU
+        cudaMemcpy(d_input_image_data, wbImage_getData(input_image), size_channels * sizeof(float), cudaMemcpyHostToDevice);
+
         unsigned char *d_input_image, *d_gray_image, *d_uchar_image;
         int *d_histogram;
         float *d_cdf;
-
-        // Alocação de memoria na gpu
         cudaMalloc(&d_input_image, size_channels * sizeof(unsigned char));
         cudaMalloc(&d_gray_image, size * sizeof(unsigned char));
         cudaMalloc(&d_uchar_image, size_channels * sizeof(unsigned char));
         cudaMalloc(&d_histogram, HISTOGRAM_LENGTH * sizeof(int));
         cudaMalloc(&d_cdf, HISTOGRAM_LENGTH * sizeof(float));
-        cudaCheckError();
+        float cdf[256];
+        // Processing iterations
+        for (int i = 0; i < iterations; i++) {
+            histogram_equalization(width, height,
+                                   d_input_image_data, d_output_image_data,
+                                   d_input_image, d_gray_image, d_uchar_image,
+                                   d_histogram, d_cdf,
+                                   cdf);
 
-        convertFloatToUChar(input_image_data, uchar_image.get(), size_channels);
-        cudaMemcpy(d_input_image, uchar_image.get(), size_channels * sizeof(unsigned char), cudaMemcpyHostToDevice);
+            // Swap pointers for next iteration
+            std::swap(d_input_image_data, d_output_image_data);
+        }
 
+        // Copy final output data back to host
+        cudaMemcpy(output_image_data, d_output_image_data, size_channels * sizeof(float), cudaMemcpyDeviceToHost);
 
-        convertToGrayscaleGPU(d_input_image, d_gray_image, width, height);
-
-        // Inicializar histograma (isto vem substituir o fill)
-        cudaMemset(d_histogram, 0, HISTOGRAM_LENGTH * sizeof(int));
-
-
-        computeHistogramWithCUB(d_gray_image, d_histogram, size);
-
-
-        computeCDFWithCUB(d_histogram, d_cdf, HISTOGRAM_LENGTH, size);
-
-        // Copiar o cdf de volta o host para encontrar o valor min
-        cudaMemcpy(cdf, d_cdf, HISTOGRAM_LENGTH * sizeof(float), cudaMemcpyDeviceToHost);
-        cudaCheckError();
-
-        //min
-        float cdf_min = *std::min_element(cdf, cdf + HISTOGRAM_LENGTH);
-
-
-        cudaMemcpy(d_uchar_image, uchar_image.get(), size_channels * sizeof(unsigned char), cudaMemcpyHostToDevice);
-        applyColorCorrectionGPU(d_uchar_image, d_cdf, cdf_min, size_channels);
-
-
-        convertToFloat(uchar_image.get(), output_image_data, size_channels);
-
-        // Libertar a memoria gpu (importante, se vires que nao meti algum mete)
+        // Free all GPU memory
         cudaFree(d_input_image);
         cudaFree(d_gray_image);
         cudaFree(d_uchar_image);
         cudaFree(d_histogram);
         cudaFree(d_cdf);
-
-
-    }
-
-
-
-    wbImage_t iterative_histogram_equalization(wbImage_t &input_image, int iterations) {
-
-        const auto width = wbImage_getWidth(input_image);
-        const auto height = wbImage_getHeight(input_image);
-        constexpr auto channels = 3;
-        const auto size = width * height;
-        const auto size_channels = size * channels;
-
-        wbImage_t output_image = wbImage_new(width, height, channels);
-        float *input_image_data = wbImage_getData(input_image);
-        float *output_image_data = wbImage_getData(output_image);
-
-        std::shared_ptr<unsigned char[]> uchar_image(new unsigned char[size_channels]);
-        std::shared_ptr<unsigned char[]> gray_image(new unsigned char[size]);
-
-        int histogram[HISTOGRAM_LENGTH];
-        float cdf[HISTOGRAM_LENGTH];
-
-        for (int i = 0; i < iterations; i++) {
-            histogram_equalization(width, height,
-                                   input_image_data, output_image_data,
-                                   uchar_image, gray_image,
-                                   histogram, cdf);
-
-            input_image_data = output_image_data;
-        }
+        cudaFree(d_input_image_data);
+        cudaFree(d_output_image_data);
 
         return output_image;
     }

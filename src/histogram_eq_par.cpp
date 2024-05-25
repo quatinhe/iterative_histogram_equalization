@@ -5,10 +5,11 @@
 #include "histogram_eq.h"
 #include <chrono>
 #include <iostream>
-#include <algorithm>
 #include <omp.h>
 
+
 namespace cp {
+
     constexpr auto HISTOGRAM_LENGTH = 256; // Corresponde ao número de tons de cinza em 8bit
 
     static float inline prob(const int x, const int size) {
@@ -56,6 +57,8 @@ namespace cp {
             histogram[value]++;
         }
     }
+
+
 
     void computeCDF(int* histogram, float* cdf, int size, int total_pixels) {
         // Computação das probabilidades em paralelo
@@ -111,7 +114,17 @@ namespace cp {
         convertToGrayscale(uchar_image.get(), gray_image.get(), width, height);
 
         std::fill(histogram, histogram + HISTOGRAM_LENGTH, 0);
+
+
+
         computeHistogram(gray_image.get(), histogram, size);
+
+
+
+        //computeHistogramWithCUB(gray_image.get(), histogram, size);
+
+
+
 
         cdf[0] = prob(histogram[0], size);
         computeCDF(histogram, cdf, HISTOGRAM_LENGTH, size*channels);
