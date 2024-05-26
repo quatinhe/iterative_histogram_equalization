@@ -17,7 +17,7 @@ g++ -fopenmp -I../include -I../libwb -o histogram_eq_par main.cpp histogram_eq_p
 
 iterations=(10 20 30 40 50 60 70)
 threads=(4 6 8)
-image_files=("../src/lake.ppm" "../src/lake.ppm" "../src/lake.ppm")
+image_files=("../src/lake.ppm" "../dataset/big_sample.ppm" "../dataset/input01.ppm")
 
 
 for iter in "${iterations[@]}"; do
