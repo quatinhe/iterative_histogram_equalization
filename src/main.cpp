@@ -2,6 +2,8 @@
 #include "histogram_eq.h"
 #include <cstdlib>
 #include <chrono>
+#include <iostream>
+#include <omp.h>
 
 int main(int argc, char **argv) {
 
@@ -9,7 +11,6 @@ int main(int argc, char **argv) {
         std::cout << "usage" << argv[0] << " input_image.ppm n_iterations output_image.ppm\n";
         return 1;
     }
-
     wbImage_t inputImage = wbImport(argv[1]);
     int n_iterations = static_cast<int>(std::strtol(argv[2], nullptr, 10));
 
