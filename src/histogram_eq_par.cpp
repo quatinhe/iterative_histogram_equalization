@@ -28,11 +28,7 @@ namespace cp {
 
     void convertToGrayscale(const unsigned char* input_image, unsigned char* output_image, int width, int height) {
         /** O Colapse neste contexto permite o OpenMP distribuir as iterações de ambos os loops pelas threads*/
-<<<<<<< Updated upstream
 #pragma omp parallel for collapse(2) num_threads(NUM_THREADS)
-=======
-#pragma omp parallel for collapse(2)
->>>>>>> Stashed changes
         for (int i = 0; i < height; i++) {
             for (int j = 0; j < width; j++) {
                 int idx = i * width + j;
@@ -48,11 +44,7 @@ namespace cp {
     }
 
     void convertFloatToUChar(const float* input_image_data, unsigned char* output_image, int size_channels) {
-<<<<<<< Updated upstream
         #pragma omp parallel for num_threads(NUM_THREADS)
-=======
-#pragma omp parallel for
->>>>>>> Stashed changes
         for (int i = 0; i < size_channels; i++) {
             output_image[i] = static_cast<unsigned char>(255 * input_image_data[i]);
         }
@@ -60,11 +52,7 @@ namespace cp {
 
     void computeCDF(int* histogram, float* cdf, int size, int total_pixels) {
         // Computação das probabilidades em paralelo
-<<<<<<< Updated upstream
         #pragma omp parallel for num_threads(NUM_THREADS)
-=======
-#pragma omp parallel for
->>>>>>> Stashed changes
         for (int i = 0; i < size; i++) {
             cdf[i] = prob(histogram[i], total_pixels);
         }
@@ -74,11 +62,7 @@ namespace cp {
     }
 
     void applyColorCorrectionAndConvertToFloat(const unsigned char* image, const float* cdf, float cdf_min, int size_channels, float* output_image_data) {
-<<<<<<< Updated upstream
 #pragma omp parallel for num_threads(NUM_THREADS)
-=======
-#pragma omp parallel for
->>>>>>> Stashed changes
         for (int i = 0; i < size_channels; i++) {
             float color = correct_color(cdf[image[i]], cdf_min);
             output_image_data[i] = color / 255.0f;
@@ -86,11 +70,7 @@ namespace cp {
     }
 
     void computeHistogram(const unsigned char* gray_image, int* histogram, int size) {
-<<<<<<< Updated upstream
         #pragma omp parallel for reduction(+ : histogram[:HISTOGRAM_LENGTH]) num_threads(NUM_THREADS)
-=======
-#pragma omp parallel for reduction(+ : histogram[:HISTOGRAM_LENGTH])
->>>>>>> Stashed changes
         for (int i = 0; i < size; i++) {
             histogram[gray_image[i]]++;
         }
@@ -176,6 +156,7 @@ namespace cp {
 
             input_image_data = output_image_data;
         }
+
         return output_image;
     }
 }
