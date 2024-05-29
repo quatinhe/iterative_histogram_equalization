@@ -3,13 +3,9 @@
 //
 
 #include "histogram_eq.h"
-#include <chrono>
 #include <iostream>
-#include <omp.h>
 #include <cub/cub.cuh>
 #include <thrust/transform.h>
-#include <thrust/device_vector.h>
-#include <thrust/execution_policy.h>
 #include <algorithm>
 
 
@@ -39,35 +35,12 @@ __global__ void transformHistogramToProb(const int* histogram, float* prob, int 
     }
 }
 
-__global__ void convertToGrayscaleKernel(const unsigned char* input, unsigned char* output, int width, int height) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-
-    if (x < width && y < height) {
-        int idx = y * width + x;
-        unsigned char r = input[3 * idx];
-        unsigned char g = input[3 * idx + 1];
-        unsigned char b = input[3 * idx + 2];
-
-        // (Método da limunisidade) --> para a conversão grayscale
-        unsigned char gray = static_cast<unsigned char>(0.21f * r + 0.71f * g + 0.07f * b);
-        output[idx] = gray;
-    }
-}
-
 __global__ void applyColorCorrectionKernel(unsigned char* image, const float* cdf, float cdf_min, int size_channels) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx < size_channels) {
         unsigned char pixelValue = image[idx];
         image[idx] = correct_color_device(cdf[pixelValue], cdf_min);
-    }
-}
-
-__global__ void convertFloatToUCharKernel(const float* input, unsigned char* output, int size) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < size) {
-        output[idx] = static_cast<unsigned char>(255 * input[idx]);
     }
 }
 
@@ -78,44 +51,35 @@ __global__ void convertToFloatKernel(const unsigned char* input, float* output, 
     }
 }
 
+__global__ void combinedKernel(const float* inputFloat, unsigned char* outputGray, int width, int height) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int idx = y * width + x;
+
+    if (x < width && y < height) {
+        // First part: Convert float to unsigned char
+        unsigned char ucharValue = static_cast<unsigned char>(255 * inputFloat[idx]);
+
+        // Assuming the float input was an RGB image stored linearly as floats
+        // Adjust indices accordingly if format is different
+        unsigned char r = ucharValue; // For the given idx
+        unsigned char g = ucharValue; // Adjust if separate channels
+        unsigned char b = ucharValue; // Adjust if separate channels
+
+        // Second part: Convert to grayscale
+        unsigned char gray = static_cast<unsigned char>(0.21f * r + 0.71f * g + 0.07f * b);
+        outputGray[idx] = gray;
+    }
+}
+
 
 namespace cp {
 
-    static float inline prob(const int x, const int size) {
-        return (float) x / (float) size;
-    }
-
-    static unsigned char inline clamp(unsigned char x) { //assegura q um valor está no range
-        return std::min(std::max(x, static_cast<unsigned char>(0)), static_cast<unsigned char>(255));
-    }
-
-    static unsigned char inline correct_color(float cdf_val, float cdf_min) {
-        return clamp(static_cast<unsigned char>(255 * (cdf_val - cdf_min) / (1 - cdf_min)));
-    }
-
-
-    void convertToGrayscaleGPU(const unsigned char* d_input, unsigned char* d_output, int width, int height) {
-        //cada bloco contÊm 16x16=256 threads  --> Fazer testes para ver se o 16 é mesmo o melhor
-        dim3 block(16, 16);
-        //Especifica o número de blocos em cada dimensão (widht e height)
+    void combinedGPU(const float* d_input, unsigned char* d_output, int width, int height, int blockWidth, int blockHeight) {
+        dim3 block(blockWidth, blockHeight);
         dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y);
 
-        convertToGrayscaleKernel<<<grid, block>>>(d_input, d_output, width, height);
-        cudaCheckError();
-    }
-
-    void convertFloatToUChar(const float* input_image_data, unsigned char* output_image, int size_channels) {
-        #pragma omp parallel for
-        for (int i = 0; i < size_channels; i++) {
-            output_image[i] = static_cast<unsigned char>(255 * input_image_data[i]);
-        }
-    }
-
-    void convertFloatToUCharGPU(const float* d_input, unsigned char* d_output, int size_channels) {
-        int threadsPerBlock = 256;
-        int blocksPerGrid = (size_channels + threadsPerBlock - 1) / threadsPerBlock;
-
-        convertFloatToUCharKernel<<<blocksPerGrid, threadsPerBlock>>>(d_input, d_output, size_channels);
+        combinedKernel<<<grid, block>>>(d_input, d_output, width, height);
         cudaCheckError();
     }
 
@@ -143,37 +107,16 @@ namespace cp {
     }
 
 
-    void computeCDFWithCUB(const int* d_histogram, float* d_cdf, int num_bins, int total_pixels, cudaStream_t stream = 0) {
-        float* d_prob;
-        cudaMalloc(&d_prob, num_bins * sizeof(float));
+    void computeCDFWithCUB(const int* d_histogram, float* d_cdf, float* d_prob, void* d_temp_storage, size_t temp_storage_bytes, int num_bins, int total_pixels, cudaStream_t stream = 0) {
         cudaCheckError();
 
-        // Converter histograma paara prob no GPU
         int threadsPerBlock = 256;
         int numBlocks = (num_bins + threadsPerBlock - 1) / threadsPerBlock;
         transformHistogramToProb<<<numBlocks, threadsPerBlock>>>(d_histogram, d_prob, total_pixels);
         cudaCheckError();
 
-        // storage temporaria para o profixo sum
-        void* d_temp_storage = nullptr;
-        size_t temp_storage_bytes = 0;
-        cub::DeviceScan::InclusiveSum(d_temp_storage, temp_storage_bytes, d_prob, d_cdf, num_bins, stream);
-        cudaMalloc(&d_temp_storage, temp_storage_bytes);
         cub::DeviceScan::InclusiveSum(d_temp_storage, temp_storage_bytes, d_prob, d_cdf, num_bins, stream);
         cudaCheckError();
-
-        cudaFree(d_temp_storage);
-        cudaFree(d_prob);
-    }
-
-    // Encontrar o valor minimo com o reduction
-    float findMinCDF(const float* cdf, int length) {
-        float cdf_min = cdf[0];
-        #pragma omp parallel for reduction(min: cdf_min)
-        for (int i = 1; i < length; i++) {
-            cdf_min = std::min(cdf_min, cdf[i]);
-        }
-        return cdf_min;
     }
 
     void applyColorCorrectionGPU(unsigned char* d_image, const float* d_cdf, float cdf_min, int size_channels) {
@@ -184,12 +127,6 @@ namespace cp {
         cudaCheckError();
     }
 
-    void convertToFloat(const unsigned char* input_image, float* output_image_data, int size_channels) {
-        #pragma omp parallel for
-        for (int i = 0; i < size_channels; i++) {
-            output_image_data[i] = static_cast<float>(input_image[i]) / 255.0f;
-        }
-    }
     void convertToFloatGPU(const unsigned char* d_input, float* d_output, int size_channels) {
         int threadsPerBlock = 256;
         int blocksPerGrid = (size_channels + threadsPerBlock - 1) / threadsPerBlock;
@@ -208,25 +145,27 @@ namespace cp {
             unsigned char *d_uchar_image,
             int *d_histogram,
             float *d_cdf,
+            float *d_prob,
+            void *d_temp_storage,
+            size_t temp_storage_bytes,
+            cudaStream_t stream,
             float (&cdf)[HISTOGRAM_LENGTH]
     ) {
 
         constexpr auto channels = 3;
         const auto size = width * height;
         const auto size_channels = size * channels;
+        int blockWidth = 16;
+        int blockHeight = 16;
 
-        convertFloatToUCharGPU(d_input_image_data, d_uchar_image, size_channels);
-
-        convertToGrayscaleGPU(d_input_image, d_gray_image, width, height);
+        combinedGPU(d_input_image_data, d_gray_image, width, height,  blockWidth, blockHeight);
 
         cudaMemset(d_histogram, 0, HISTOGRAM_LENGTH * sizeof(int));
 
         computeHistogramWithCUB(d_gray_image, d_histogram, size);
 
-        computeCDFWithCUB(d_histogram, d_cdf, HISTOGRAM_LENGTH, size);
+        computeCDFWithCUB(d_histogram, d_cdf, d_prob, d_temp_storage, temp_storage_bytes, HISTOGRAM_LENGTH, size, stream);
 
-        cudaMemcpy(cdf, d_cdf, HISTOGRAM_LENGTH * sizeof(float), cudaMemcpyDeviceToHost);
-        cudaCheckError();
 
         float cdf_min = *std::min_element(cdf, cdf + HISTOGRAM_LENGTH);
 
@@ -246,43 +185,48 @@ namespace cp {
         const int size = width * height;
         const int size_channels = size * channels;
 
-        // Allocate memory for the output image
+        // alocar memoria para a imagem de output
         wbImage_t output_image = wbImage_new(width, height, channels);
         float *output_image_data = wbImage_getData(output_image);
 
-        // GPU memory allocations
+        // alocacao de memoria GPU
         float *d_input_image_data, *d_output_image_data;
         cudaMalloc(&d_input_image_data, size_channels * sizeof(float));
         cudaMalloc(&d_output_image_data, size_channels * sizeof(float));
 
-        // Transfer input data to GPU
+        // transferir o input para a GPU
         cudaMemcpy(d_input_image_data, wbImage_getData(input_image), size_channels * sizeof(float), cudaMemcpyHostToDevice);
 
         unsigned char *d_input_image, *d_gray_image, *d_uchar_image;
         int *d_histogram;
-        float *d_cdf;
+        float *d_cdf, *d_prob;
+        void *d_temp_storage = nullptr; // storage temporaria para cub (cdf)
+        size_t temp_storage_bytes = 0;
+
         cudaMalloc(&d_input_image, size_channels * sizeof(unsigned char));
         cudaMalloc(&d_gray_image, size * sizeof(unsigned char));
         cudaMalloc(&d_uchar_image, size_channels * sizeof(unsigned char));
         cudaMalloc(&d_histogram, HISTOGRAM_LENGTH * sizeof(int));
         cudaMalloc(&d_cdf, HISTOGRAM_LENGTH * sizeof(float));
-        float cdf[256];
-        // Processing iterations
-        for (int i = 0; i < iterations; i++) {
-            histogram_equalization(width, height,
-                                   d_input_image_data, d_output_image_data,
-                                   d_input_image, d_gray_image, d_uchar_image,
-                                   d_histogram, d_cdf,
-                                   cdf);
+        cudaMalloc(&d_prob, HISTOGRAM_LENGTH * sizeof(float));
 
-            // Swap pointers for next iteration
+        cub::DeviceScan::InclusiveSum(d_temp_storage, temp_storage_bytes, d_prob, d_cdf, HISTOGRAM_LENGTH);
+        cudaMalloc(&d_temp_storage, temp_storage_bytes);
+
+        float cdf[256];
+
+        for (int i = 0; i < iterations; i++) {
+            histogram_equalization(width, height, d_input_image_data, d_output_image_data, d_input_image, d_gray_image, d_uchar_image,
+                                   d_histogram, d_cdf, d_prob, d_temp_storage, temp_storage_bytes, nullptr, cdf);
+
+            // trocar pointer para a prox iter
             std::swap(d_input_image_data, d_output_image_data);
         }
 
-        // Copy final output data back to host
+
         cudaMemcpy(output_image_data, d_output_image_data, size_channels * sizeof(float), cudaMemcpyDeviceToHost);
 
-        // Free all GPU memory
+
         cudaFree(d_input_image);
         cudaFree(d_gray_image);
         cudaFree(d_uchar_image);
