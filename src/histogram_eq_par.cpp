@@ -28,7 +28,7 @@ namespace cp {
 
     void convertToGrayscale(const unsigned char* input_image, unsigned char* output_image, int width, int height) {
         /** O Colapse neste contexto permite o OpenMP distribuir as iterações de ambos os loops pelas threads*/
-        #pragma omp for collapse(2)
+#pragma omp for collapse(2)
         for (int i = 0; i < height; i++) {
             for (int j = 0; j < width; j++) {
                 int idx = i * width + j;
@@ -44,14 +44,14 @@ namespace cp {
     }
 
     void convertFloatToUChar(const float* input_image_data, unsigned char* output_image, int size_channels) {
-        #pragma omp for
+#pragma omp for
         for (int i = 0; i < size_channels; i++) {
             output_image[i] = static_cast<unsigned char>(255 * input_image_data[i]);
         }
     }
 
     void computeCDF(int* histogram, float* cdf, int size, int total_pixels) {
-        #pragma omp single
+#pragma omp single
         for (int i = 0; i < size; i++) {
             cdf[i] = cdf[i - 1] + prob(histogram[i], total_pixels);
         }
@@ -59,7 +59,7 @@ namespace cp {
     }
 
     void applyColorCorrectionAndConvertToFloat(const unsigned char* image, const float* cdf, float cdf_min, int size_channels, float* output_image_data) {
-        #pragma omp for
+#pragma omp for
         for (int i = 0; i < size_channels; i++) {
             float color = correct_color(cdf[image[i]], cdf_min);
             output_image_data[i] = color / 255.0f;
@@ -67,7 +67,7 @@ namespace cp {
     }
 
     void computeHistogram(const unsigned char* gray_image, int* histogram, int size) {
-        #pragma omp for reduction(+ : histogram[:HISTOGRAM_LENGTH])
+#pragma omp for reduction(+ : histogram[:HISTOGRAM_LENGTH])
         for (int i = 0; i < size; i++) {
             histogram[gray_image[i]]++;
         }
@@ -91,7 +91,7 @@ namespace cp {
         convertFloatToUChar(input_image_data, uchar_image.get(), size_channels);
         auto finish = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> elapsed1 = finish - start;
-        #pragma omp atomic
+#pragma omp atomic
         chronos[0] += elapsed1.count();
 
         start = std::chrono::high_resolution_clock::now();
@@ -150,7 +150,7 @@ namespace cp {
         float cdf[HISTOGRAM_LENGTH];
 
         for (int i = 0; i < iterations; i++) {
-            #pragma omp parallel num_threads (NUM_THREADS)
+#pragma omp parallel num_threads (NUM_THREADS)
             {
                 histogram_equalization(width, height,
                                        input_image_data, output_image_data,
