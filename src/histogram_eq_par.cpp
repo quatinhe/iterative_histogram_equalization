@@ -91,7 +91,6 @@ namespace cp {
         convertFloatToUChar(input_image_data, uchar_image.get(), size_channels);
         auto finish = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> elapsed1 = finish - start;
-#pragma omp atomic
         chronos[0] += elapsed1.count();
 
         start = std::chrono::high_resolution_clock::now();
