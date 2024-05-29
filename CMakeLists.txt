@@ -1,15 +1,10 @@
-cmake_minimum_required(VERSION 3.18)
-message(STATUS "CUDA Architectures: ${CMAKE_CUDA_ARCHITECTURES}")
-set(CMAKE_CUDA_COMPILER "/usr/local/cuda-12.4/bin/nvcc")
-project(project LANGUAGES CXX CUDA)
-message(STATUS "Your message here")
+cmake_minimum_required(VERSION 3.16)
+project(project)
+
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CUDA_STANDARD 14)
-set(CMAKE_CUDA_ARCHITECTURES 50)
-message(STATUS "CUDA Architecture set to: ${CMAKE_CUDA_ARCHITECTURES}")
 
-find_package(CUDA REQUIRED)
-
+#find OpenMP
+find_package(OpenMP REQUIRED)
 
 ###############
 # libWB
@@ -18,8 +13,6 @@ find_package(CUDA REQUIRED)
 set(BUILD_LIBWB_LIBRARY ON CACHE BOOL "Turn on build of libwb library")
 add_subdirectory(libwb)
 include_directories(libwb)
-include_directories(${CUDA_INCLUDE_DIRS} ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
-include_directories(include)
 
 ###############
 # sequencial
@@ -30,6 +23,7 @@ include_directories(include)
 add_executable(project
         src/main.cpp
         src/histogram_eq.cpp
+
 )
 target_link_libraries(project wb)
 
@@ -47,15 +41,44 @@ add_executable(project_par
 
 target_link_libraries(project_par PUBLIC OpenMP::OpenMP_CXX wb)
 
-###############
-#GPU
-###############
-include_directories(${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
-add_executable(project_par_gpu
-        src/main.cpp
-        src/histogram_eq.cu
-        # Change to .cu if using CUDA kernels
-)
+##############################################################
+# Tests
+##############################################################
 
-target_link_libraries(project_par_gpu PUBLIC OpenMP::OpenMP_CXX wb ${CUDA_LIBRARIES} ${CUDA_CUDA_LIBRARY})
-set_target_properties(project_par_gpu PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+enable_testing()
+
+#############
+# Download and unpack googletest at configure time
+#############
+
+set (GTEST_HOME ${CMAKE_CURRENT_BINARY_DIR}/googletest)
+
+message ("-- Loading Google Test from ${GTEST_HOME}")
+
+configure_file(${PROJECT_SOURCE_DIR}/cmake/CMakeLists.googletest.in ${GTEST_HOME}/download/CMakeLists.txt)
+
+execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
+        RESULT_VARIABLE result
+        WORKING_DIRECTORY ${GTEST_HOME}/download )
+if(result)
+    message(FATAL_ERROR "CMake step for googletest failed: ${result}")
+endif()
+
+execute_process(COMMAND ${CMAKE_COMMAND} --build .
+        RESULT_VARIABLE result
+        WORKING_DIRECTORY ${GTEST_HOME}/download )
+if(result)
+    message(FATAL_ERROR "Build step for googletest failed: ${result}")
+endif()
+
+# Prevent overriding the parent project's compiler/linker settings on Windows
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+
+# Add googletest directly to our build. This defines the gtest and gtest_main targets.
+add_subdirectory(${GTEST_HOME}/src
+        ${GTEST_HOME}/build
+        EXCLUDE_FROM_ALL)
+
+set (GTEST_BOTH_LIBRARIES gtest_main gtest)
+
+add_subdirectory (test)

@@ -28,17 +28,21 @@ namespace cp {
                                        const std::shared_ptr<unsigned char[]> &uchar_image,
                                        const std::shared_ptr<unsigned char[]> &gray_image,
                                        int (&histogram)[HISTOGRAM_LENGTH],
-                                       float (&cdf)[HISTOGRAM_LENGTH]) {
+                                       float (&cdf)[HISTOGRAM_LENGTH],
+                                       double (&chronos)[5]) {
 
         constexpr auto channels = 3;
         const auto size = width * height;
         const auto size_channels = size * channels;
 
         auto start = std::chrono::high_resolution_clock::now();
-
         for (int i = 0; i < size_channels; i++)
             uchar_image[i] = (unsigned char) (255 * input_image_data[i]);
+        auto finish = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed1 = finish - start;
+        chronos[0] += elapsed1.count();
 
+        start = std::chrono::high_resolution_clock::now();
         for (int i = 0; i < height; i++)
             for (int j = 0; j < width; j++) {
                 auto idx = i * width + j;
@@ -48,46 +52,48 @@ namespace cp {
                 gray_image[idx] = static_cast<unsigned char>(0.21 * r + 0.71 * g + 0.07 * b);
             }
 
-        auto finish = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double> elapsed = finish - start;
-        std::cout << "Tempo total image conversion : " << elapsed.count() << "\n";
+        finish = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed2 = finish - start;
+        chronos[1] += elapsed2.count();
 
-
-        auto start2 = std::chrono::high_resolution_clock::now();
         std::fill(histogram, histogram + HISTOGRAM_LENGTH, 0);
+        start = std::chrono::high_resolution_clock::now();
         for (int i = 0; i < size; i++)
             histogram[gray_image[i]]++;
+        finish = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed3 = finish - start;
+        chronos[2] += elapsed3.count();
 
-        auto finish2 = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double> elapsed2 = finish2 - start2;
-        std::cout << "Tempo total histogram computation : " << elapsed2.count() << "\n";
-
-        auto start3 = std::chrono::high_resolution_clock::now();
         cdf[0] = prob(histogram[0], size);
+
+        start = std::chrono::high_resolution_clock::now();
         for (int i = 1; i < HISTOGRAM_LENGTH; i++)
             cdf[i] = cdf[i - 1] + prob(histogram[i], size);
+
+        finish = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed4 = finish - start;
+        chronos[3] += elapsed4.count();
 
         auto cdf_min = cdf[0];
         for (int i = 1; i < HISTOGRAM_LENGTH; i++)
             cdf_min = std::min(cdf_min, cdf[i]);
 
-        auto end3 = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double> elapsed3 = end3 - start3;
-        std::cout << "Tempo total cdf computation : " << elapsed3.count() << "\n";
+        start = std::chrono::high_resolution_clock::now();
 
-        auto start4 = std::chrono::high_resolution_clock::now();
         for (int i = 0; i < size_channels; i++)
             uchar_image[i] = correct_color(cdf[uchar_image[i]], cdf_min);
 
         for (int i = 0; i < size_channels; i++)
             output_image_data[i] = static_cast<float>(uchar_image[i]) / 255.0f;
-        auto end4 = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double> elapsed4 = end4 - start4;
-        std::cout << "Tempo total color correction : " << elapsed4.count() << "\n";
+        finish = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed6 = finish - start;
+        chronos[4] += elapsed6.count();
+
+
     }
 
     wbImage_t iterative_histogram_equalization(wbImage_t &input_image, int iterations) {
-
+        double chronos[5] = {};
         const auto width = wbImage_getWidth(input_image);
         const auto height = wbImage_getHeight(input_image);
         constexpr auto channels = 3;
@@ -108,11 +114,15 @@ namespace cp {
             histogram_equalization(width, height,
                                    input_image_data, output_image_data,
                                    uchar_image, gray_image,
-                                   histogram, cdf);
+                                   histogram, cdf,
+                                   chronos);
 
             input_image_data = output_image_data;
         }
 
+        for(int i = 0; i < 5; i++){
+            std::cout << "Tempo total função " << i << " : " << chronos[i] << "\n";
+        }
         return output_image;
     }
 }
