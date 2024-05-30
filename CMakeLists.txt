@@ -41,44 +41,24 @@ add_executable(project_par
 
 target_link_libraries(project_par PUBLIC OpenMP::OpenMP_CXX wb)
 
-##############################################################
-# Tests
-##############################################################
+###############
+#GPU
+###############
+include_directories(${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+add_executable(project_par_gpu
+        src/main.cpp
+        src/histogram_eq.cu
+)
 
-enable_testing()
+target_link_libraries(project_par_gpu PUBLIC OpenMP::OpenMP_CXX wb ${CUDA_LIBRARIES} ${CUDA_CUDA_LIBRARY})
+set_target_properties(project_par_gpu PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 
-#############
-# Download and unpack googletest at configure time
-#############
+add_executable(project_par_gpu_metrics
+        src/main.cpp
+        src/histogram_eq_metrics.cu
+        src/histogram_eq_metrics.cu
+)
 
-set (GTEST_HOME ${CMAKE_CURRENT_BINARY_DIR}/googletest)
-
-message ("-- Loading Google Test from ${GTEST_HOME}")
-
-configure_file(${PROJECT_SOURCE_DIR}/cmake/CMakeLists.googletest.in ${GTEST_HOME}/download/CMakeLists.txt)
-
-execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
-        RESULT_VARIABLE result
-        WORKING_DIRECTORY ${GTEST_HOME}/download )
-if(result)
-    message(FATAL_ERROR "CMake step for googletest failed: ${result}")
-endif()
-
-execute_process(COMMAND ${CMAKE_COMMAND} --build .
-        RESULT_VARIABLE result
-        WORKING_DIRECTORY ${GTEST_HOME}/download )
-if(result)
-    message(FATAL_ERROR "Build step for googletest failed: ${result}")
-endif()
-
-# Prevent overriding the parent project's compiler/linker settings on Windows
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-
-# Add googletest directly to our build. This defines the gtest and gtest_main targets.
-add_subdirectory(${GTEST_HOME}/src
-        ${GTEST_HOME}/build
-        EXCLUDE_FROM_ALL)
-
-set (GTEST_BOTH_LIBRARIES gtest_main gtest)
-
-add_subdirectory (test)
+target_compile_options(project_par_gpu_metrics PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-v,--verbose>)
+target_link_libraries(project_par_gpu_metrics PUBLIC OpenMP::OpenMP_CXX wb ${CUDA_LIBRARIES} ${CUDA_CUDA_LIBRARY})
+set_target_properties(project_par_gpu_metrics PROPERTIES CUDA_SEPARABLE_COMPILATION ON)

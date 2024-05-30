@@ -61,11 +61,12 @@ __global__ void combinedKernel(const float* inputFloat, unsigned char* outputGra
         unsigned char ucharValue = static_cast<unsigned char>(255 * inputFloat[idx]);
 
 
+
         unsigned char r = ucharValue;
         unsigned char g = ucharValue;
         unsigned char b = ucharValue;
 
-        
+
         unsigned char gray = static_cast<unsigned char>(0.21f * r + 0.71f * g + 0.07f * b);
         outputGray[idx] = gray;
     }
@@ -88,28 +89,28 @@ namespace cp {
         void *d_temp_storage = nullptr;
         size_t temp_storage_bytes = 0;
 
-        // GET do tempo de storage necessário
+
         cub::DeviceHistogram::HistogramEven(d_temp_storage, temp_storage_bytes,
                                             d_input, d_histogram,
                                             HISTOGRAM_LENGTH + 1, 0, 256, num_items, stream);
 
-        // Alocar a storage temp.
+
         cudaMalloc(&d_temp_storage, temp_storage_bytes);
 
-        // Computação do histograma
+
         cub::DeviceHistogram::HistogramEven(d_temp_storage, temp_storage_bytes,
                                             d_input, d_histogram,
                                             HISTOGRAM_LENGTH + 1, 0, 256, num_items, stream);
 
-        // Libertar storage temporária
+
         cudaFree(d_temp_storage);
     }
 
 
-    void computeCDFWithCUB(const int* d_histogram, float* d_cdf, float* d_prob, void* d_temp_storage, size_t temp_storage_bytes, int num_bins, int total_pixels, cudaStream_t stream = 0) {
+    void computeCDFWithCUB(const int* d_histogram, float* d_cdf, float* d_prob, void* d_temp_storage, size_t temp_storage_bytes, int num_bins, int total_pixels, int blockWidth, int blockHeight, cudaStream_t stream = 0) {
         cudaCheckError();
 
-        int threadsPerBlock = 256;
+        int threadsPerBlock = blockWidth * blockHeight;
         int numBlocks = (num_bins + threadsPerBlock - 1) / threadsPerBlock;
         transformHistogramToProb<<<numBlocks, threadsPerBlock>>>(d_histogram, d_prob, total_pixels);
         cudaCheckError();
@@ -118,16 +119,16 @@ namespace cp {
         cudaCheckError();
     }
 
-    void applyColorCorrectionGPU(unsigned char* d_image, const float* d_cdf, float cdf_min, int size_channels) {
-        int threadsPerBlock = 256;
+    void applyColorCorrectionGPU(unsigned char* d_image, const float* d_cdf, float cdf_min, int size_channels, int blockWidth, int blockHeight) {
+        int threadsPerBlock = blockWidth * blockHeight;
         int blocksPerGrid = (size_channels + threadsPerBlock - 1) / threadsPerBlock;
 
         applyColorCorrectionKernel<<<blocksPerGrid, threadsPerBlock>>>(d_image, d_cdf, cdf_min, size_channels);
         cudaCheckError();
     }
 
-    void convertToFloatGPU(const unsigned char* d_input, float* d_output, int size_channels) {
-        int threadsPerBlock = 256;
+    void convertToFloatGPU(const unsigned char* d_input, float* d_output, int size_channels, int blockWidth,int blockHeight) {
+        int threadsPerBlock = blockWidth * blockHeight;
         int blocksPerGrid = (size_channels + threadsPerBlock - 1) / threadsPerBlock;
 
         convertToFloatKernel<<<blocksPerGrid, threadsPerBlock>>>(d_input, d_output, size_channels);
@@ -139,7 +140,6 @@ namespace cp {
             const int width, const int height,
             float *d_input_image_data,
             float *d_output_image_data,
-            unsigned char *d_input_image,
             unsigned char *d_gray_image,
             unsigned char *d_uchar_image,
             int *d_histogram,
@@ -163,15 +163,15 @@ namespace cp {
 
         computeHistogramWithCUB(d_gray_image, d_histogram, size);
 
-        computeCDFWithCUB(d_histogram, d_cdf, d_prob, d_temp_storage, temp_storage_bytes, HISTOGRAM_LENGTH, size, stream);
+        computeCDFWithCUB(d_histogram, d_cdf, d_prob, d_temp_storage, temp_storage_bytes, HISTOGRAM_LENGTH, size, blockWidth, blockHeight, stream);
 
 
         float cdf_min = *std::min_element(cdf, cdf + HISTOGRAM_LENGTH);
 
 
-        applyColorCorrectionGPU(d_uchar_image, d_cdf, cdf_min, size_channels);
+        applyColorCorrectionGPU(d_uchar_image, d_cdf, cdf_min, size_channels, blockWidth, blockHeight);
 
-        convertToFloatGPU(d_uchar_image, d_output_image_data, size_channels);
+        convertToFloatGPU(d_uchar_image, d_output_image_data, size_channels, blockWidth, blockHeight);
     }
 
 
@@ -215,7 +215,7 @@ namespace cp {
         float cdf[256];
 
         for (int i = 0; i < iterations; i++) {
-            histogram_equalization(width, height, d_input_image_data, d_output_image_data, d_input_image, d_gray_image, d_uchar_image,
+            histogram_equalization(width, height, d_input_image_data, d_output_image_data, d_gray_image, d_uchar_image,
                                    d_histogram, d_cdf, d_prob, d_temp_storage, temp_storage_bytes, nullptr, cdf);
 
             // trocar pointer para a prox iter
