@@ -131,7 +131,7 @@ namespace cp {
 
     wbImage_t iterative_histogram_equalization(wbImage_t &input_image, int iterations) {
         double chronos[5] = {};
-        double times[5] = {12.27, 17.44, 5.48, 0.00013, 62.62};
+        double times[5] = {6.57, 4.30, 1.83, 0.00018, 26.13};
         const auto width = wbImage_getWidth(input_image);
         const auto height = wbImage_getHeight(input_image);
         constexpr auto channels = 3;
