@@ -11,3 +11,5 @@
 -All the .csv files obtained by the scripts are on anex in the final report and on the src folder.
 
 -To calculate the initial measures we used an image 3000x3000 and 100 iterations
+
+-*Final note*: We greatly enjoyed working on this project, which deepened our understanding of how CPUs and GPUs interact and operate. This experience has significantly expanded our knowledge of parallel computing techniques and their applications. The project challenged us to push beyond our previous boundaries, leading to a more profound grasp of advanced computational strategies.
